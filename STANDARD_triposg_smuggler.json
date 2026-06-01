@@ -1,0 +1,154 @@
+{
+  "last_node_id": 8,
+  "last_link_id": 7,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [0, 120],
+      "size": [210, 130],
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [1], "slot_index": 0},
+        {"name": "MASK",  "type": "MASK",  "links": [],  "slot_index": 1}
+      ],
+      "title": "Load T-Pose Image",
+      "widgets_values": ["input_character.png", "image"]
+    },
+    {
+      "id": 2,
+      "type": "TripoSGModelLoader",
+      "pos": [0, 300],
+      "size": [280, 60],
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "TRIPOSG", "type": "TRIPOSG", "links": [2], "slot_index": 0}
+      ],
+      "title": "TripoSG Model Loader",
+      "widgets_values": ["VAST-AI/TripoSG"]
+    },
+    {
+      "id": 3,
+      "type": "TripoSGPrepareImage",
+      "pos": [260, 120],
+      "size": [260, 60],
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "IMAGE", "link": 1, "slot_index": 0}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [3, 5], "slot_index": 0}
+      ],
+      "title": "TripoSG Prepare Image",
+      "widgets_values": []
+    },
+    {
+      "id": 4,
+      "type": "TripoSGInference",
+      "pos": [560, 200],
+      "size": [300, 150],
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {"name": "model", "type": "TRIPOSG", "link": 2, "slot_index": 0},
+        {"name": "image", "type": "IMAGE",   "link": 3, "slot_index": 1}
+      ],
+      "outputs": [
+        {"name": "trimesh", "type": "TRIMESH", "links": [4], "slot_index": 0},
+        {"name": "parts",   "type": "TRIMESH", "links": [],  "slot_index": 1}
+      ],
+      "title": "TripoSG Inference",
+      "widgets_values": [42, 50, 7.0]
+    },
+    {
+      "id": 5,
+      "type": "SaveTrimesh",
+      "pos": [900, 160],
+      "size": [300, 100],
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {"name": "trimesh", "type": "TRIMESH", "link": 4, "slot_index": 0}
+      ],
+      "outputs": [
+        {"name": "glb_path", "type": "STRING", "links": [6], "slot_index": 0}
+      ],
+      "title": "Save GLB",
+      "widgets_values": ["3D/triposg", "glb", true]
+    },
+    {
+      "id": 6,
+      "type": "SaveImage",
+      "pos": [560, 40],
+      "size": [300, 130],
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {"name": "images", "type": "IMAGE", "link": 5, "slot_index": 0}
+      ],
+      "outputs": [],
+      "title": "Save Preview Image",
+      "widgets_values": ["triposg/preview"]
+    },
+    {
+      "id": 7,
+      "type": "MeshSmuggleGate",
+      "pos": [900, 320],
+      "size": [320, 80],
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {"name": "glb_path", "type": "STRING", "link": 6, "slot_index": 0}
+      ],
+      "outputs": [
+        {"name": "glb_path", "type": "STRING", "links": [7], "slot_index": 0}
+      ],
+      "title": "Smuggle Gate  (map slot1 -> enable)",
+      "widgets_values": [0]
+    },
+    {
+      "id": 8,
+      "type": "SmuggleMeshAsImage",
+      "pos": [1260, 320],
+      "size": [330, 130],
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {"name": "glb_path", "type": "STRING", "link": 7, "slot_index": 0}
+      ],
+      "outputs": [
+        {"name": "png_paths", "type": "STRING", "links": [], "slot_index": 0}
+      ],
+      "title": "Smuggle Mesh As Image",
+      "widgets_values": ["smuggle/mesh", true, 2048]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 3, 0, "IMAGE"],
+    [2, 2, 0, 4, 0, "TRIPOSG"],
+    [3, 3, 0, 4, 1, "IMAGE"],
+    [4, 4, 0, 5, 0, "TRIMESH"],
+    [5, 3, 0, 6, 0, "IMAGE"],
+    [6, 5, 0, 7, 0, "STRING"],
+    [7, 7, 0, 8, 0, "STRING"]
+  ],
+  "groups": [
+    {
+      "title": "Optional mesh smuggling (slot1 = 1 to enable)",
+      "bounding": [880, 250, 730, 220],
+      "color": "#3f789e",
+      "font_size": 24
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {"scale": 0.8, "offset": [0, 0]},
+    "frontendVersion": "1.43.18"
+  },
+  "version": 0.4
+}

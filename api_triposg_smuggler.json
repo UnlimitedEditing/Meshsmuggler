@@ -1,0 +1,95 @@
+{
+  "1": {
+    "inputs": {
+      "image": "input_character.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load T-Pose Image"
+    }
+  },
+  "2": {
+    "inputs": {
+      "UNKNOWN": "VAST-AI/TripoSG"
+    },
+    "_meta": {
+      "title": "TripoSG Model Loader"
+    }
+  },
+  "3": {
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "TripoSG Prepare Image"
+    }
+  },
+  "4": {
+    "inputs": {
+      "UNKNOWN": 7,
+      "model": [
+        "2",
+        0
+      ],
+      "image": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "TripoSG Inference"
+    }
+  },
+  "5": {
+    "inputs": {
+      "UNKNOWN": true,
+      "trimesh": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Save GLB"
+    }
+  },
+  "6": {
+    "inputs": {
+      "filename_prefix": "triposg/preview",
+      "images": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Preview Image"
+    }
+  },
+  "7": {
+    "inputs": {
+      "UNKNOWN": 0,
+      "glb_path": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Smuggle Gate  (map slot1 -> enable)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "UNKNOWN": 2048,
+      "glb_path": [
+        "7",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Smuggle Mesh As Image"
+    }
+  }
+}
