@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meshsmuggler</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+      }
+    }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --accent:   #4caf9e;
+      --bg:       #0d0d0d;
+      --surface:  #111;
+      --border:   #1e1e1e;
+      --text:     #ddd;
+      --muted:    #555;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    header h1 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      color: var(--accent);
+    }
+
+    header span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    /* ── Drop zone ──────────────────────────────────────── */
+    #drop-zone {
+      flex-shrink: 0;
+      margin: 12px 20px 0;
+      padding: 18px 20px;
+      border: 2px dashed #2a2a2a;
+      border-radius: 8px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      user-select: none;
+    }
+
+    #drop-zone:hover,
+    #drop-zone:focus-visible { border-color: var(--accent); outline: none; }
+    #drop-zone.drag-over     { border-color: var(--accent); background: rgba(76,175,158,.06); }
+
+    #drop-zone p { color: var(--muted); line-height: 1.7; }
+    #drop-zone strong { color: var(--accent); font-weight: 600; }
+    #file-input { display: none; }
+
+    /* ── Status bar ─────────────────────────────────────── */
+    #status {
+      flex-shrink: 0;
+      height: 28px;
+      line-height: 28px;
+      padding: 0 20px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #status.ok  { color: var(--accent); }
+    #status.err { color: #e05c5c; }
+
+    /* ── 3-D viewer ─────────────────────────────────────── */
+    #viewer {
+      flex: 1;
+      position: relative;
+      margin: 0 20px;
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      min-height: 0;
+    }
+
+    #viewer canvas { display: block; width: 100% !important; height: 100% !important; }
+
+    #viewer-hint {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      pointer-events: none;
+      color: #2a2a2a;
+      font-size: 13px;
+    }
+
+    #viewer-hint svg { opacity: .15; }
+
+    /* ── Footer buttons ─────────────────────────────────── */
+    footer {
+      flex-shrink: 0;
+      padding: 10px 20px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    button {
+      padding: 7px 18px;
+      border-radius: 6px;
+      border: 1px solid #2a2a2a;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      transition: all .12s;
+    }
+
+    button:hover:not(:disabled) { border-color: #444; color: var(--text); }
+    button:disabled { opacity: .3; cursor: default; }
+
+    #dl-btn {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    #dl-btn:hover:not(:disabled) { background: rgba(76,175,158,.1); }
+
+    #chunk-badge {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>MESHSMUGGLER</h1>
+  <span>drop a smuggled PNG to recover the mesh</span>
+</header>
+
+<div id="drop-zone" tabindex="0" role="button" aria-label="Drop zone">
+  <p>Drop <strong>smuggled PNG(s)</strong> here</p>
+  <p style="font-size:11px; margin-top:4px">or <strong>click to browse</strong> — for multi-chunk files drop all PNGs at once</p>
+  <input type="file" id="file-input" multiple accept=".png,image/png">
+</div>
+
+<div id="status">Ready.</div>
+
+<div id="viewer">
+  <div id="viewer-hint">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+      <line x1="12" y1="22.08" x2="12" y2="12"/>
+    </svg>
+    3D model appears here
+  </div>
+</div>
+
+<footer>
+  <button id="dl-btn" disabled>⬇ Download GLB</button>
+  <button id="reset-btn">↺ Reset</button>
+  <span id="chunk-badge"></span>
+</footer>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader }     from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls }  from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ── Container constants (must match nodes/__init__.py) ──────────────────────
+const MAGIC       = 'M3DS';
+const HEADER_SIZE = 40;     // struct.calcsize(">4sBBHHQIIQIH")
+const FLAG_GZIP   = 0x01;
+
+// ── App state ───────────────────────────────────────────────────────────────
+let pendingChunks = [];   // parsed chunk objects
+let recoveredData = null; // Uint8Array of the decoded file
+let recoveredName = 'mesh.glb';
+
+// ── DOM ─────────────────────────────────────────────────────────────────────
+const dropZone   = document.getElementById('drop-zone');
+const fileInput  = document.getElementById('file-input');
+const statusEl   = document.getElementById('status');
+const viewerEl   = document.getElementById('viewer');
+const hintEl     = document.getElementById('viewer-hint');
+const dlBtn      = document.getElementById('dl-btn');
+const resetBtn   = document.getElementById('reset-btn');
+const chunkBadge = document.getElementById('chunk-badge');
+
+// ── Three.js ─────────────────────────────────────────────────────────────────
+let renderer, scene, camera, controls, currentModel;
+
+function initThree() {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
+  viewerEl.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x111111);
+
+  // PBR environment
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+  camera = new THREE.PerspectiveCamera(40, 1, 0.001, 1000);
+  camera.position.set(0, 1.2, 3.5);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.07;
+  controls.minDistance   = 0.05;
+  controls.maxDistance   = 100;
+  controls.target.set(0, 0.4, 0);
+
+  // Subtle grid
+  const grid = new THREE.GridHelper(10, 20, 0x1c1c1c, 0x161616);
+  scene.add(grid);
+
+  syncSize();
+  window.addEventListener('resize', syncSize);
+
+  (function loop() {
+    requestAnimationFrame(loop);
+    controls.update();
+    renderer.render(scene, camera);
+  })();
+}
+
+function syncSize() {
+  if (!renderer) return;
+  const w = viewerEl.clientWidth, h = viewerEl.clientHeight;
+  renderer.setSize(w, h, false);
+  if (camera) { camera.aspect = w / h; camera.updateProjectionMatrix(); }
+}
+
+async function showGLB(buffer) {
+  if (currentModel) { scene.remove(currentModel); currentModel = null; }
+
+  const loader = new GLTFLoader();
+  const url = URL.createObjectURL(new Blob([buffer], { type: 'model/gltf-binary' }));
+
+  await new Promise((res, rej) => {
+    loader.load(url, gltf => {
+      URL.revokeObjectURL(url);
+      const model = gltf.scene;
+
+      // Centre and fit to a 2-unit bounding sphere
+      const box    = new THREE.Box3().setFromObject(model);
+      const center = box.getCenter(new THREE.Vector3());
+      const size   = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z) || 1;
+      const scale  = 2 / maxDim;
+      model.position.copy(center.negate().multiplyScalar(scale));
+      model.position.y += (size.y * scale) * 0.5; // rest on grid
+      model.scale.setScalar(scale);
+
+      scene.add(model);
+      currentModel = model;
+      controls.target.set(0, (size.y * scale) * 0.5, 0);
+      controls.update();
+      hintEl.style.display = 'none';
+      res();
+    }, undefined, rej);
+  });
+}
+
+// ── CRC-32 (matches Python zlib.crc32) ─────────────────────────────────────
+function crc32(data) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < data.length; i++) {
+    c ^= data[i];
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+  }
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// ── Gzip decompress via Streams API ────────────────────────────────────────
+async function gunzip(data) {
+  const ds     = new DecompressionStream('gzip');
+  const writer = ds.writable.getWriter();
+  const reader = ds.readable.getReader();
+  writer.write(data);
+  writer.close();
+  const parts = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+  }
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let off = 0;
+  for (const p of parts) { out.set(p, off); off += p.length; }
+  return out;
+}
+
+// ── PNG → raw RGB bytes (drops alpha) ──────────────────────────────────────
+function imgFromFile(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); res(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error(`Cannot load ${file.name}`)); };
+    img.src = url;
+  });
+}
+
+async function pngToRGB(file) {
+  const img = await imgFromFile(file);
+  const c   = document.createElement('canvas');
+  c.width   = img.naturalWidth;
+  c.height  = img.naturalHeight;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const rgba = ctx.getImageData(0, 0, c.width, c.height).data; // Uint8ClampedArray, RGBA
+  const rgb  = new Uint8Array(c.width * c.height * 3);
+  for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+    rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
+  }
+  return rgb;
+}
+
+// ── Parse one smuggled PNG ──────────────────────────────────────────────────
+async function parseChunk(file) {
+  const rgb = await pngToRGB(file);
+  if (rgb.length < HEADER_SIZE)
+    throw new Error(`${file.name}: image too small to contain a header`);
+
+  const magic = String.fromCharCode(rgb[0], rgb[1], rgb[2], rgb[3]);
+  if (magic !== MAGIC)
+    throw new Error(`${file.name}: not a smuggled image — magic is "${magic}", expected "M3DS"`);
+
+  const view = new DataView(rgb.buffer);
+  const version = rgb[4];
+  if (version !== 1) throw new Error(`${file.name}: unsupported container version ${version}`);
+
+  const flags         = rgb[5];
+  const chunk_index   = view.getUint16(6,  false);
+  const chunk_count   = view.getUint16(8,  false);
+  const blob_total    = Number(view.getBigUint64(10, false));
+  const pay_len       = view.getUint32(18, false);
+  const pay_crc       = view.getUint32(22, false);
+  const orig_len      = Number(view.getBigUint64(26, false));
+  const orig_crc      = view.getUint32(34, false);
+  const fname_len     = view.getUint16(38, false);
+
+  let pos = HEADER_SIZE;
+  const filename = new TextDecoder().decode(rgb.subarray(pos, pos + fname_len));
+  pos += fname_len;
+  const payload = rgb.slice(pos, pos + pay_len);
+
+  if (payload.length !== pay_len)
+    throw new Error(`${file.name}: payload truncated (${payload.length} of ${pay_len} bytes)`);
+
+  if (crc32(payload) !== pay_crc)
+    throw new Error(`${file.name}: chunk CRC mismatch — pixels were altered after export`);
+
+  return { flags, chunk_index, chunk_count, blob_total,
+           orig_len, orig_crc, filename, payload };
+}
+
+// ── Reassemble all chunks into the original file ────────────────────────────
+async function reconstruct(chunks) {
+  chunks.sort((a, b) => a.chunk_index - b.chunk_index);
+  const head = chunks[0];
+
+  for (let i = 0; i < chunks.length; i++) {
+    if (chunks[i].chunk_index !== i)
+      throw new Error(`Missing chunk ${i} — provide all ${head.chunk_count} PNG(s)`);
+  }
+
+  // Concatenate payloads
+  const blob = new Uint8Array(head.blob_total);
+  let off = 0;
+  for (const c of chunks) { blob.set(c.payload, off); off += c.payload.length; }
+
+  const raw = (head.flags & FLAG_GZIP) ? await gunzip(blob) : blob;
+
+  if (raw.length !== head.orig_len)
+    throw new Error(`Size mismatch: decoded ${raw.length} bytes, expected ${head.orig_len}`);
+  if (crc32(raw) !== head.orig_crc)
+    throw new Error('Final CRC mismatch — file corrupted in transit');
+
+  return { data: raw, filename: head.filename || 'mesh.glb' };
+}
+
+// ── Handle dropped / selected files ────────────────────────────────────────
+async function handleFiles(files) {
+  const pngs = [...files].filter(f => f.name.toLowerCase().endsWith('.png') || f.type === 'image/png');
+  if (!pngs.length) { setStatus('No PNG files found in selection.', 'err'); return; }
+
+  setStatus(`Reading ${pngs.length} file(s)…`);
+
+  for (const f of pngs) {
+    try {
+      const chunk = await parseChunk(f);
+      if (!pendingChunks.find(c => c.chunk_index === chunk.chunk_index))
+        pendingChunks.push(chunk);
+    } catch (e) {
+      setStatus(e.message, 'err');
+      return;
+    }
+  }
+
+  if (!pendingChunks.length) return;
+
+  const expected = pendingChunks[0].chunk_count;
+  const have     = pendingChunks.length;
+  updateChunkBadge(have, expected);
+
+  if (have < expected) {
+    setStatus(`${have} of ${expected} chunk(s) loaded — drop the remaining PNG(s).`);
+    return;
+  }
+
+  setStatus('Reconstructing…');
+  try {
+    const { data, filename } = await reconstruct(pendingChunks);
+    recoveredData = data;
+    recoveredName = filename;
+    dlBtn.disabled = false;
+
+    const kb = (data.length / 1024).toFixed(1);
+    const ext = filename.split('.').pop().toLowerCase();
+
+    if (ext === 'glb' || ext === 'gltf') {
+      setStatus(`Recovered "${filename}" (${kb} KB) — loading viewer…`);
+      try {
+        await showGLB(data);
+        setStatus(`"${filename}" — ${kb} KB  ·  drag to orbit  ·  scroll to zoom`, 'ok');
+      } catch {
+        setStatus(`Recovered "${filename}" (${kb} KB) — GLB loaded but viewer failed. Download it.`, 'ok');
+      }
+    } else {
+      setStatus(`Recovered "${filename}" (${kb} KB) — not a GLB, viewer skipped.`, 'ok');
+    }
+  } catch (e) {
+    setStatus(e.message, 'err');
+  }
+}
+
+// ── UI helpers ──────────────────────────────────────────────────────────────
+function setStatus(msg, type = '') {
+  statusEl.textContent = msg;
+  statusEl.className   = type;
+}
+
+function updateChunkBadge(have, expected) {
+  chunkBadge.textContent = expected > 1 ? `chunks: ${have} / ${expected}` : '';
+}
+
+// ── Download ─────────────────────────────────────────────────────────────────
+dlBtn.addEventListener('click', () => {
+  if (!recoveredData) return;
+  const url = URL.createObjectURL(new Blob([recoveredData]));
+  Object.assign(document.createElement('a'), { href: url, download: recoveredName }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+});
+
+// ── Reset ─────────────────────────────────────────────────────────────────────
+resetBtn.addEventListener('click', () => {
+  pendingChunks = [];
+  recoveredData = null;
+  recoveredName = 'mesh.glb';
+  dlBtn.disabled = true;
+  chunkBadge.textContent = '';
+  if (currentModel) { scene.remove(currentModel); currentModel = null; }
+  hintEl.style.display = '';
+  setStatus('Ready.');
+});
+
+// ── Drop zone wiring ─────────────────────────────────────────────────────────
+dropZone.addEventListener('click',    ()  => fileInput.click());
+dropZone.addEventListener('keydown',  e   => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+fileInput.addEventListener('change',  e   => handleFiles(e.target.files));
+dropZone.addEventListener('dragover', e   => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop',     e   => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  handleFiles(e.dataTransfer.files);
+});
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+initThree();
+</script>
+
+</body>
+</html>
