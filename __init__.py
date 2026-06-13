@@ -118,6 +118,117 @@ def build_chunks(data: bytes, compress: bool, filename: str, max_dimension: int)
     return arrays, flags, chunk_count
 
 
+def _parse_chunk(flat: bytes, source_name: str) -> dict:
+    if len(flat) < HEADER_SIZE:
+        raise ValueError(f"{source_name}: too small to be a smuggled image")
+    (magic, version, flags, chunk_index, chunk_count,
+     blob_total, chunk_payload_len, chunk_crc,
+     orig_len, orig_crc, fname_len) = struct.unpack(HEADER_FMT, flat[:HEADER_SIZE])
+    if magic != MAGIC:
+        raise ValueError(f"{source_name}: not a smuggled image (bad magic)")
+    if version != VERSION:
+        raise ValueError(f"{source_name}: unsupported container version {version}")
+    pos = HEADER_SIZE
+    filename = flat[pos:pos + fname_len].decode("utf-8", "replace")
+    pos += fname_len
+    payload = flat[pos:pos + chunk_payload_len]
+    if len(payload) != chunk_payload_len:
+        raise ValueError(
+            f"{source_name}: payload truncated (have {len(payload)}, "
+            f"need {chunk_payload_len}) -- the image was likely resized/re-encoded")
+    if (zlib.crc32(payload) & 0xFFFFFFFF) != chunk_crc:
+        raise ValueError(
+            f"{source_name}: chunk CRC mismatch -- pixels were altered "
+            f"(lossy re-encode or resize somewhere in the pipeline)")
+    return {
+        "flags": flags, "chunk_index": chunk_index, "chunk_count": chunk_count,
+        "blob_total": blob_total, "orig_len": orig_len, "orig_crc": orig_crc,
+        "filename": filename, "payload": payload,
+    }
+
+
+def reconstruct_from_arrays(arrays):
+    """Reconstruct (data_bytes, filename) from a list of HxWx3 uint8 RGB arrays."""
+    parsed = [_parse_chunk(arr.reshape(-1).tobytes(), f"image[{i}]") for i, arr in enumerate(arrays)]
+    parsed.sort(key=lambda d: d["chunk_index"])
+
+    head = parsed[0]
+    chunk_count = head["chunk_count"]
+    flags, filename = head["flags"], head["filename"]
+    orig_len, orig_crc, blob_total = head["orig_len"], head["orig_crc"], head["blob_total"]
+
+    if len(parsed) != chunk_count:
+        raise ValueError(
+            f"expected {chunk_count} chunk image(s) but got {len(parsed)}; "
+            f"wire every chunk PNG into this node's images input")
+    indices = [d["chunk_index"] for d in parsed]
+    if indices != list(range(chunk_count)):
+        raise ValueError(f"chunk indices are wrong or duplicated: {indices}")
+
+    blob = b"".join(d["payload"] for d in parsed)
+    if len(blob) != blob_total:
+        raise ValueError(f"reassembled blob is {len(blob)} bytes, expected {blob_total}")
+
+    data = gzip.decompress(blob) if (flags & FLAG_GZIP) else blob
+    if len(data) != orig_len:
+        raise ValueError(f"decoded size {len(data)} != expected {orig_len}")
+    if (zlib.crc32(data) & 0xFFFFFFFF) != orig_crc:
+        raise ValueError("final CRC mismatch -- data corrupted in transit")
+
+    return data, (filename or "recovered.bin")
+
+
+class UnsmuggleMeshFromImage:
+    """Reconstruct the original mesh file (e.g. .glb) from PNG(s) produced by
+    'Smuggle Mesh As Image'. Wire in every chunk image as an IMAGE batch
+    (e.g. from Load Image / Load Image From URL with multiple outputs, or a
+    batch loader) and get back a file path usable by downstream mesh nodes.
+    """
+
+    def __init__(self):
+        self.output_dir = (
+            folder_paths.get_output_directory() if _HAS_FOLDER_PATHS else os.path.abspath("./output")
+        )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "filename_prefix": ("STRING", {"default": "smuggle/decoded"}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("file_path",)
+    FUNCTION = "unsmuggle"
+    OUTPUT_NODE = True
+    CATEGORY = "mesh_smuggle"
+
+    def unsmuggle(self, images, filename_prefix):
+        arrays = [
+            np.clip(img.cpu().numpy() * 255.0, 0, 255).astype(np.uint8)
+            for img in images
+        ]
+        data, filename = reconstruct_from_arrays(arrays)
+
+        if _HAS_FOLDER_PATHS:
+            full_output_folder, fname, counter, subfolder, _ = \
+                folder_paths.get_save_image_path(filename_prefix, self.output_dir)
+        else:
+            full_output_folder = self.output_dir
+            os.makedirs(full_output_folder, exist_ok=True)
+            fname, counter, subfolder = "mesh", 0, ""
+
+        ext = os.path.splitext(filename)[1] or ".glb"
+        out_path = os.path.join(full_output_folder, f"{fname}_{counter:05}_{ext}")
+        with open(out_path, "wb") as f:
+            f.write(data)
+
+        print(f"[MeshSmuggler] decoded {filename} ({len(data)} bytes) -> {out_path}")
+        return (out_path,)
+
+
 class SmuggleMeshAsImage:
     """Pack a binary file into lossless PNG(s) for retrieval through an image output."""
 
@@ -235,10 +346,12 @@ class MeshSmuggleGate:
 NODE_CLASS_MAPPINGS = {
     "SmuggleMeshAsImage": SmuggleMeshAsImage,
     "MeshSmuggleGate": MeshSmuggleGate,
+    "UnsmuggleMeshFromImage": UnsmuggleMeshFromImage,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SmuggleMeshAsImage": "Smuggle Mesh As Image",
     "MeshSmuggleGate": "Mesh Smuggle Gate (slot toggle)",
+    "UnsmuggleMeshFromImage": "Unsmuggle Mesh From Image",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
