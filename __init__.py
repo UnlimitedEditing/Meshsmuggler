@@ -14,6 +14,7 @@ License: MIT
 """
 
 import os
+import json
 import math
 import gzip
 import zlib
@@ -251,6 +252,105 @@ class ConstantString:
         return (value,)
 
 
+class SaveTrellisState:
+    """Serialise a TRELLIS.2 sparse LATENT dict (e.g. the final shape latent: samples, coords,
+    coord_counts, coord_resolution, model_frame ...) as a safetensors blob (tensors) with the
+    non-tensor keys as JSON metadata -- no pickle -- and smuggle it as PNG so a LATER, separate
+    Graydient job can resume from it (jobs share no memory). Pair with LoadTrellisState.
+    `enable` False emits nothing (lets one workflow save state only in its shape-only mode)."""
+
+    def __init__(self):
+        self.output_dir = (
+            folder_paths.get_output_directory() if _HAS_FOLDER_PATHS else os.path.abspath("./output")
+        )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT",),
+                "enable": ("BOOLEAN", {"default": True}),
+                "filename_prefix": ("STRING", {"default": "smuggle/trellis_state"}),
+                "max_dimension": ("INT", {"default": 4096, "min": 64, "max": 16384, "step": 64}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("png_paths",)
+    FUNCTION = "save"
+    OUTPUT_NODE = True
+    CATEGORY = "mesh_smuggle"
+
+    def save(self, latent, enable, filename_prefix, max_dimension):
+        if not enable:
+            print("[MeshSmuggler] SaveTrellisState disabled; nothing emitted.")
+            return {"ui": {"images": []}, "result": ("",)}
+        import torch
+        from safetensors.torch import save as st_save
+
+        tensors, meta = {}, {}
+        for k, v in latent.items():
+            if torch.is_tensor(v):
+                tensors[k] = v.detach().cpu().contiguous()
+            else:
+                try:
+                    json.dumps(v)
+                    meta[k] = v
+                except (TypeError, ValueError):
+                    print(f"[MeshSmuggler] SaveTrellisState: skipping non-serialisable key {k!r} ({type(v).__name__})")
+        if "samples" not in tensors:
+            raise ValueError("SaveTrellisState: latent has no 'samples' tensor")
+        blob = st_save(tensors, metadata={"kind": "trellis2_latent", "trellis_state": json.dumps(meta)})
+        arrays, flags, chunk_count = build_chunks(blob, True, "trellis_state.safetensors", int(max_dimension))
+
+        if _HAS_FOLDER_PATHS:
+            folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
+        else:
+            folder, filename, counter, subfolder = self.output_dir, "state", 0, ""
+        os.makedirs(folder, exist_ok=True)
+        results, saved = [], []
+        for arr in arrays:
+            file = f"{filename}_{counter:05}_.png"
+            fp = os.path.join(folder, file)
+            Image.fromarray(arr, mode="RGB").save(fp, format="PNG", compress_level=6)
+            results.append({"filename": file, "subfolder": subfolder, "type": "output"})
+            saved.append(fp)
+            counter += 1
+        print(f"[MeshSmuggler] SaveTrellisState: {len(blob)} bytes, tensors={ {k: tuple(v.shape) for k, v in tensors.items()} }, "
+              f"meta={list(meta)} -> {chunk_count} PNG(s)")
+        return {"ui": {"images": results}, "result": ("\n".join(saved),)}
+
+
+class LoadTrellisState:
+    """Inverse of SaveTrellisState: IMAGE batch (every chunk PNG, loaded losslessly) -> LATENT dict."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"images": ("IMAGE",)}}
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION = "load"
+    CATEGORY = "mesh_smuggle"
+
+    def load(self, images):
+        from safetensors.torch import load as st_load
+
+        # rint, NOT truncation: float32 pixel/255*255 can land just under the integer
+        arrays = [np.clip(np.rint(img.cpu().numpy() * 255.0), 0, 255).astype(np.uint8) for img in images]
+        data, filename = reconstruct_from_arrays(arrays)
+        header_len = int.from_bytes(data[:8], "little")
+        header = json.loads(data[8:8 + header_len].decode("utf-8"))
+        md = header.get("__metadata__", {})
+        if md.get("kind") != "trellis2_latent":
+            raise ValueError(f"{filename}: not a TRELLIS.2 state blob (kind={md.get('kind')!r})")
+        latent = dict(st_load(data))
+        latent.update(json.loads(md.get("trellis_state", "{}")))
+        print(f"[MeshSmuggler] LoadTrellisState: {filename} -> keys {sorted(latent)}; "
+              f"samples {tuple(latent['samples'].shape)} {latent['samples'].dtype}")
+        return (latent,)
+
+
 class SaveFile3DForSmuggle:
     """Write a ComfyUI-native FILE_3D_GLB (e.g. MeshToFile3D output: GLB with UVs, textures and
     PBR maps, held in memory) to a file under output/ and return its path, so it can feed
@@ -405,6 +505,8 @@ NODE_CLASS_MAPPINGS = {
     "UnsmuggleMeshFromImage": UnsmuggleMeshFromImage,
     "ConstantString": ConstantString,
     "SaveFile3DForSmuggle": SaveFile3DForSmuggle,
+    "SaveTrellisState": SaveTrellisState,
+    "LoadTrellisState": LoadTrellisState,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SmuggleMeshAsImage": "Smuggle Mesh As Image",
@@ -412,6 +514,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "UnsmuggleMeshFromImage": "Unsmuggle Mesh From Image",
     "ConstantString": "Constant String",
     "SaveFile3DForSmuggle": "Save File3D (for smuggle)",
+    "SaveTrellisState": "Save TRELLIS.2 State (smuggle)",
+    "LoadTrellisState": "Load TRELLIS.2 State (from image)",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
