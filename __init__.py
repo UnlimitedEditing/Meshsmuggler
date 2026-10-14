@@ -229,6 +229,62 @@ class UnsmuggleMeshFromImage:
         return (out_path,)
 
 
+class ConstantString:
+    """Outputs a fixed string literal. Useful for feeding a hardcoded path into
+    inputs that require a link (e.g. SmuggleMeshAsImage.glb_path, which has
+    forceInput=True and therefore cannot take a widget value directly)."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "value": ("STRING", {"default": ""}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("value",)
+    FUNCTION = "get"
+    CATEGORY = "mesh_smuggle"
+
+    def get(self, value):
+        return (value,)
+
+
+class SaveFile3DForSmuggle:
+    """Write a ComfyUI-native FILE_3D_GLB (e.g. MeshToFile3D output: GLB with UVs, textures and
+    PBR maps, held in memory) to a file under output/ and return its path, so it can feed
+    MeshSmuggleGate -> SmuggleMeshAsImage. Native Save3D nodes return no path and Graydient's
+    native 3D output has been unreliable; the data link also guarantees the file exists before the
+    smuggler runs."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model_3d": ("FILE_3D_GLB",),
+                "filename_prefix": ("STRING", {"default": "smuggle_src/mesh"}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("file_path",)
+    FUNCTION = "save"
+    CATEGORY = "mesh_smuggle"
+
+    def save(self, model_3d, filename_prefix):
+        out_dir = folder_paths.get_output_directory() if _HAS_FOLDER_PATHS else os.path.abspath("./output")
+        if _HAS_FOLDER_PATHS:
+            folder, filename, counter, _sub, _ = folder_paths.get_save_image_path(filename_prefix, out_dir)
+        else:
+            folder, filename, counter = out_dir, "mesh", 0
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"{filename}_{counter:05}_.glb")
+        model_3d.save_to(path)
+        print(f"[MeshSmuggler] SaveFile3DForSmuggle wrote {path} ({os.path.getsize(path)} bytes)")
+        return (path,)
+
+
 class SmuggleMeshAsImage:
     """Pack a binary file into lossless PNG(s) for retrieval through an image output."""
 
@@ -347,11 +403,15 @@ NODE_CLASS_MAPPINGS = {
     "SmuggleMeshAsImage": SmuggleMeshAsImage,
     "MeshSmuggleGate": MeshSmuggleGate,
     "UnsmuggleMeshFromImage": UnsmuggleMeshFromImage,
+    "ConstantString": ConstantString,
+    "SaveFile3DForSmuggle": SaveFile3DForSmuggle,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SmuggleMeshAsImage": "Smuggle Mesh As Image",
     "MeshSmuggleGate": "Mesh Smuggle Gate (slot toggle)",
     "UnsmuggleMeshFromImage": "Unsmuggle Mesh From Image",
+    "ConstantString": "Constant String",
+    "SaveFile3DForSmuggle": "Save File3D (for smuggle)",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
